@@ -28,6 +28,7 @@ function App() {
   const [teacherAuth, setTeacherAuth] = useState(false);
   const [teacherPassword, setTeacherPassword] = useState('');
   const [teacherTab, setTeacherTab] = useState<'journal' | 'keys' | 'aggregate'>('journal');
+  const [isSkipped, setIsSkipped] = useState(false);
 
   // Station flow: narrative -> question -> feedback -> minigame -> summary -> next
   const miniGameOrder = ['timeline', 'match', 'concepts', 'coalitions', 'vienna', 'truefalse'];
@@ -49,10 +50,23 @@ function App() {
     if (stationPhase === 'feedback') return;
     setSelectedOption(idx);
     setStationPhase('feedback');
+    setIsSkipped(false);
     const correct = stations[currentStation].options[idx].correct;
     setStationScores(prev => ({
       ...prev,
       [stations[currentStation].id]: correct ? 100 : 30
+    }));
+  };
+
+  const handleSkipStation = () => {
+    // При пропуске засчитываем 0 баллов, показываем правильный ответ
+    setStationPhase('feedback');
+    setIsSkipped(true);
+    const correctIdx = stations[currentStation].options.findIndex(o => o.correct);
+    setSelectedOption(correctIdx);
+    setStationScores(prev => ({
+      ...prev,
+      [stations[currentStation].id]: 0
     }));
   };
 
@@ -69,11 +83,19 @@ function App() {
     setScreen('summary');
   };
 
+  const handleSkipMiniGame = () => {
+    // При пропуске мини-игры засчитываем 0 баллов и идём к карточке
+    const mgId = currentMiniGame!;
+    setMiniGameScores(prev => ({ ...prev, [mgId]: 0 }));
+    setScreen('summary');
+  };
+
   const handleNextFromSummary = () => {
     if (currentStation < stations.length - 1) {
       setCurrentStation(prev => prev + 1);
       setStationPhase('narrative');
       setSelectedOption(null);
+      setIsSkipped(false);
       setScreen('station');
     } else {
       setScreen('diagnosis');
@@ -166,7 +188,7 @@ function App() {
       <div className="app-container">
         <Header title="Мини-игра" progress={`${currentStation + 1}/${stations.length}`} onBack={() => setScreen('summary')} />
         <div className="main-content">
-          <MiniGameComponent gameId={currentMiniGame} onComplete={handleMiniGameComplete} />
+          <MiniGameComponent gameId={currentMiniGame} onComplete={handleMiniGameComplete} onSkip={handleSkipMiniGame} />
         </div>
       </div>
     );
@@ -213,6 +235,9 @@ function App() {
                 <button className="btn btn-primary" onClick={() => setStationPhase('question')}>
                   Сделать выбор →
                 </button>
+                <button className="btn btn-skip" onClick={() => setStationPhase('question')}>
+                  Сразу к вопросу →
+                </button>
               </div>
             </>
           )}
@@ -230,6 +255,11 @@ function App() {
                     {opt.text}
                   </div>
                 ))}
+              </div>
+              <div style={{ marginTop: 15, display: 'flex', justifyContent: 'flex-end' }}>
+                <button className="btn btn-skip btn-small" onClick={handleSkipStation}>
+                  Пропустить вопрос →
+                </button>
               </div>
             </div>
           )}
@@ -249,11 +279,19 @@ function App() {
                   ))}
                 </div>
               </div>
-              <div className={`feedback-box ${station.options[selectedOption].correct ? 'feedback-correct' : 'feedback-incorrect'}`}>
-                <strong>{station.options[selectedOption].correct ? '✓ Верно!' : '✗ Не совсем...'}</strong>
-                <p>{station.options[selectedOption].feedback}</p>
-                <p className="feedback-ref">Источник: {station.paragraphs}</p>
-              </div>
+              {isSkipped ? (
+                <div className="feedback-box" style={{ background: '#fff8e1', borderLeft: '4px solid var(--warning)', color: 'var(--warning)' }}>
+                  <strong>⏭ Вопрос пропущен</strong>
+                  <p>Выше подсвечен правильный ответ. Рекомендуем перечитать {station.paragraphs}, чтобы разобраться в теме.</p>
+                  <p className="feedback-ref">Источник: {station.paragraphs}</p>
+                </div>
+              ) : (
+                <div className={`feedback-box ${station.options[selectedOption!].correct ? 'feedback-correct' : 'feedback-incorrect'}`}>
+                  <strong>{station.options[selectedOption!].correct ? '✓ Верно!' : '✗ Не совсем...'}</strong>
+                  <p>{station.options[selectedOption!].feedback}</p>
+                  <p className="feedback-ref">Источник: {station.paragraphs}</p>
+                </div>
+              )}
               <div className="nav-buttons">
                 <button className="btn btn-primary" onClick={handleNextStation}>
                   Мини-игра →
@@ -350,16 +388,27 @@ function SummaryCard({ station }: { station: typeof stations[0] }) {
 
 // === MINI GAMES ===
 
-function MiniGameComponent({ gameId, onComplete }: { gameId: string; onComplete: (score: number) => void }) {
-  switch (gameId) {
-    case 'timeline': return <TimelineGame onComplete={onComplete} />;
-    case 'match': return <MatchGame data={miniGames.match as any} onComplete={onComplete} />;
-    case 'concepts': return <MatchGame data={miniGames.concepts as any} onComplete={onComplete} />;
-    case 'coalitions': return <DistributionGame data={miniGames.coalitions} onComplete={onComplete} />;
-    case 'vienna': return <DistributionGame data={miniGames.vienna} onComplete={onComplete} />;
-    case 'truefalse': return <TrueFalseGame onComplete={onComplete} />;
-    default: return <div>Игра не найдена</div>;
-  }
+function MiniGameComponent({ gameId, onComplete, onSkip }: { gameId: string; onComplete: (score: number) => void; onSkip: () => void }) {
+  return (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+        <button className="btn btn-skip btn-small" onClick={onSkip}>
+          Пропустить игру →
+        </button>
+      </div>
+      {(() => {
+        switch (gameId) {
+          case 'timeline': return <TimelineGame onComplete={onComplete} />;
+          case 'match': return <MatchGame data={miniGames.match as any} onComplete={onComplete} />;
+          case 'concepts': return <MatchGame data={miniGames.concepts as any} onComplete={onComplete} />;
+          case 'coalitions': return <DistributionGame data={miniGames.coalitions} onComplete={onComplete} />;
+          case 'vienna': return <DistributionGame data={miniGames.vienna} onComplete={onComplete} />;
+          case 'truefalse': return <TrueFalseGame onComplete={onComplete} />;
+          default: return <div>Игра не найдена</div>;
+        }
+      })()}
+    </>
+  );
 }
 
 function TimelineGame({ onComplete }: { onComplete: (score: number) => void }) {
